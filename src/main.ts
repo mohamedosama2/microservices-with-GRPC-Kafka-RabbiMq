@@ -1,7 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions } from '@nestjs/microservices';
 import { AppModule } from './app.module';
-import { grpcClientOptions } from './grpc-client.options';
+import { kafkaClientOptions } from './kafka-client.options';
 
 async function bootstrap() {
   /**
@@ -19,7 +19,7 @@ async function bootstrap() {
    *
    */
   const app = await NestFactory.create(AppModule);
-  app.connectMicroservice<MicroserviceOptions>(grpcClientOptions);
+  app.connectMicroservice<MicroserviceOptions>(kafkaClientOptions);
 
   await app.startAllMicroservices();
   await app.listen(3001);

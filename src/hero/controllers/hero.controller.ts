@@ -1,23 +1,10 @@
-import { Controller, Get, Inject, OnModuleInit, Param } from "@nestjs/common";
-import {
-  ClientGrpc,
-  GrpcMethod,
-  GrpcStreamMethod,
-} from "@nestjs/microservices";
-import { Observable, ReplaySubject, Subject } from "rxjs";
-import { toArray } from "rxjs/operators";
+import { Controller, Get, OnModuleInit } from "@nestjs/common";
+import { Client, ClientKafka, Transport } from "@nestjs/microservices";
+import { Observable, Subject } from "rxjs";
 import { HeroById } from "../interfaces/hero-by-id.interface";
 import { Hero } from "../interfaces/hero.interface";
-import { Post } from "@nestjs/common";
-import { Body } from "@nestjs/common";
-import { CreateHeroDto } from "../dto/Hero.dto";
-import { HeroByName } from "../interfaces/create.hero.interface";
-
-interface HeroService {
-  findOne(data: HeroById): Observable<Hero>;
-  findMany(upstream: Observable<HeroById>): Observable<Hero>;
-  createHero(data: Observable<HeroByName>): Observable<Hero>;
-}
+import { first, toArray } from "rxjs/operators";
+import { kafkaClientOptions } from "src/kafka-client.options";
 
 @Controller("hero")
 export class HeroController implements OnModuleInit {
@@ -26,38 +13,40 @@ export class HeroController implements OnModuleInit {
     { id: 2, name: "Doe" },
   ];
 
-  private heroService: HeroService;
+  @Client(kafkaClientOptions)
+  client: ClientKafka;
 
-  constructor(@Inject("HERO_PACKAGE") private readonly client: ClientGrpc) {}
-
-  onModuleInit() {
-    this.heroService = this.client.getService<HeroService>("HeroService");
-    console.log(this.heroService);
+  async onModuleInit() {
+    this.client.subscribeToResponseOf("Fetch-All-Heros");
+    await this.client.connect();
   }
 
   @Get()
-  getMany(): Observable<Hero[]> {
-    const ids$ = new ReplaySubject<HeroById>();
-    ids$.next({ id: 1 });
-    ids$.next({ id: 2 });
-    ids$.complete();
-    const stream = this.heroService.findMany(ids$.asObservable());
-    return stream.pipe(toArray());
-  }
-  @Get(":id")
-  getById(@Param("id") id: string): Observable<Hero> {
-    return this.heroService.findOne({ id: +id });
-  }
-  @Post()
-  addHero(@Body() CreateHeroDto: CreateHeroDto[]) {
-    const heros$ = new ReplaySubject<HeroByName>();
-    for (let i = 0; i < CreateHeroDto.length; i++) {
-      const hero = CreateHeroDto[i];
+  async getMany() {
+    console.log("Hello");
+    const requestTopic = "Fetch-All-Heros";
+    const responseTopic = `${requestTopic}.reply`;
 
-      heros$.next({ name: hero.name });
-    }
-    heros$.complete();
-    const stream = this.heroService.createHero(heros$.asObservable());
-    return stream.pipe(toArray());
+    const response$ = new Subject<Hero[]>();
+
+    const subscription = this.client.send(requestTopic, {}).subscribe({
+      next: (data) => {
+        console.log("Data", data);
+        response$.next(data);
+      },
+      error: (error) => {
+        console.log("Error", error);
+        response$.error(error);
+      },
+      complete: () => {
+        console.log("Request completed");
+        response$.complete();
+        subscription.unsubscribe();
+      },
+    });
+
+    // Convert the observable to a promise and wait for completion
+    const data = response$.pipe(toArray());
+    return data; // Return the data
   }
 }
